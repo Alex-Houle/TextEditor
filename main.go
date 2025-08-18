@@ -1,91 +1,95 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
-	"fmt"
-	"os"
 )
 
 func main() {
 
-	// read the file name 
-	var fName string
-	if len(os.Args) > 1 {
-		fName = os.Args[1]
-		fmt.Println("File name:", fName)
-	} else {
-		fmt.Println("No file name provided")
+	if len(os.Args) <= 1 {
+		fmt.Println("Usage: go run main.go <filename>")
 		os.Exit(1)
 	}
 
-	// load data from the file
-	data, err := readFile(fName) 
+	fName := os.Args[1]
+	fmt.Println("Editing file:", fName)
+
+	// Open (or create) the file in read-write mode, append if exists
+	file, err := os.OpenFile(fName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		os.Exit(1)
+	}
+
+	defer file.Close()
+
+	// Read initial content
+	data, err := os.ReadFile(fName)
 	if err != nil {
 		fmt.Println("Error reading file:", err)
 		os.Exit(1)
 	}
-	
 
-
-	// Create a new Fyne application
+	// Initialize Fyne app
 	a := app.New()
-	w := a.NewWindow("Keyboard Input")
-	w.Resize(fyne.NewSize(400, 300))
+	w := a.NewWindow("Text Editor")
+	w.SetFullScreen(true)
 
-	message := widget.NewLabel(data)
+	message := widget.NewLabel(string(data))
 
-	// 
 	w.Canvas().SetOnTypedRune(func(r rune) {
-		data += string(r)
-		message.SetText(data)
+		data = append(data, byte(r))
+		if _, err := file.WriteString(string(r)); err != nil {
+			fmt.Println("Error writing to file:", err)
+		}
+		message.SetText(string(data))
 	})
 
-	// Handle special keys
 	w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
 		switch e.Name {
 		case fyne.KeyEscape:
-
 			w.Close()
+
 		case fyne.KeyBackspace:
 			if len(data) > 0 {
 				data = data[:len(data)-1]
-				message.SetText(data)
+
+				// Truncate file and rewrite remaining data
+				if err := file.Truncate(0); err != nil {
+					fmt.Println("Error truncating file:", err)
+				}
+				if _, err := file.WriteAt(data, 0); err != nil {
+					fmt.Println("Error writing file:", err)
+}
+
+				message.SetText(string(data))
 			}
+
 		case fyne.KeySpace:
-			data += " "
-			message.SetText(data)
+			data = append(data, ' ')
+			if _, err := file.WriteString(" "); err != nil {
+				fmt.Println("Error writing space:", err)
+			}
+			message.SetText(string(data))
+
 		case fyne.KeyReturn:
-			data += "\n"
-			message.SetText(data)
+			data = append(data, '\n')
+			if _, err := file.WriteString("\n"); err != nil {
+				fmt.Println("Error writing newline:", err)
+			}
+			message.SetText(string(data))
 		}
 	})
 
 	w.SetContent(container.NewVBox(
-		widget.NewLabel("Type anything (ESC to quit):"),
+		widget.NewLabel("Type (ESC to exit):"),
 		message,
 	))
 	w.ShowAndRun()
-}
-
-
-
-/* 
-This function reads the content of a file and returns it as a string.
-If the file cannot be opened or read, it returns an error.
-*/ 
-func readFile(fName string) (string, error) {
-	file, err := os.Open(fName)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	content, err := os.ReadFile(fName)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
 }
