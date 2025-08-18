@@ -6,4 +6,3 @@ type Node struct {
 	Size  int
 	Data  string
 }
-

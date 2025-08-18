@@ -6,8 +6,9 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
+	"fyne.io/fyne/v2/theme"
 )
 
 func main() {
@@ -26,7 +27,6 @@ func main() {
 		fmt.Println("Error opening file:", err)
 		os.Exit(1)
 	}
-
 	defer file.Close()
 
 	// Read initial content
@@ -41,16 +41,29 @@ func main() {
 	w := a.NewWindow("Text Editor")
 	w.SetFullScreen(true)
 
-	message := widget.NewLabel(string(data))
+	// Use canvas.Text instead of Label to avoid bouncing
+	message := canvas.NewText(string(data), theme.ForegroundColor())
+	message.TextStyle.Monospace = true
 
+	// Scrollable area for the text
+	scroll := container.NewVScroll(message)
+	scroll.SetMinSize(fyne.NewSize(800, 600))
+
+	updateMessage := func() {
+		message.Text = string(data)
+		message.Refresh() // redraw text without re-layout
+	}
+
+	// Handle typed runes
 	w.Canvas().SetOnTypedRune(func(r rune) {
 		data = append(data, byte(r))
 		if _, err := file.WriteString(string(r)); err != nil {
 			fmt.Println("Error writing to file:", err)
 		}
-		message.SetText(string(data))
+		updateMessage()
 	})
 
+	// Handle special keys
 	w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
 		switch e.Name {
 		case fyne.KeyEscape:
@@ -66,9 +79,9 @@ func main() {
 				}
 				if _, err := file.WriteAt(data, 0); err != nil {
 					fmt.Println("Error writing file:", err)
-}
+				}
 
-				message.SetText(string(data))
+				updateMessage()
 			}
 
 		case fyne.KeySpace:
@@ -76,20 +89,21 @@ func main() {
 			if _, err := file.WriteString(" "); err != nil {
 				fmt.Println("Error writing space:", err)
 			}
-			message.SetText(string(data))
+			updateMessage()
 
 		case fyne.KeyReturn:
 			data = append(data, '\n')
 			if _, err := file.WriteString("\n"); err != nil {
 				fmt.Println("Error writing newline:", err)
 			}
-			message.SetText(string(data))
+			updateMessage()
 		}
 	})
 
 	w.SetContent(container.NewVBox(
-		widget.NewLabel("Type (ESC to exit):"),
-		message,
+		canvas.NewText("Type (ESC to exit):", theme.ForegroundColor()),
+		scroll,
 	))
+
 	w.ShowAndRun()
 }
