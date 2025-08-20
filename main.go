@@ -3,16 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
+	"image/color"
 )
 
 func main() {
-
 	if len(os.Args) <= 1 {
 		fmt.Println("Usage: go run main.go <filename>")
 		os.Exit(1)
@@ -21,8 +21,8 @@ func main() {
 	fName := os.Args[1]
 	fmt.Println("Editing file:", fName)
 
-	// Open (or create) the file in read-write mode, append if exists
-	file, err := os.OpenFile(fName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	// Open file
+	file, err := os.OpenFile(fName, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		os.Exit(1)
@@ -36,31 +36,61 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Fyne app
 	a := app.New()
 	w := a.NewWindow("Text Editor")
-	w.SetFullScreen(true)
+	w.Resize(fyne.NewSize(800, 600))
 
-	// Use canvas.Text instead of Label to avoid bouncing
-	message := canvas.NewText(string(data), theme.ForegroundColor())
-	message.TextStyle.Monospace = true
+	textColor := color.RGBA{R: 211, G: 198, B: 170, A: 255} // #D3C6AA
 
-	// Scrollable area for the text
-	scroll := container.NewVScroll(message)
-	scroll.SetMinSize(fyne.NewSize(800, 600))
+	lines := []fyne.CanvasObject{}
+	for _, line := range strings.Split(string(data), "\n") {
+		t := canvas.NewText(line, textColor)
+		t.TextStyle.Monospace = true
+		lines = append(lines, t)
+	}
+messageBox := container.NewVBox(lines...)
 
+// Scrollable view of the VBox
+scroll := container.NewVScroll(messageBox)
+	cursor := 0
+	cursorLabel := canvas.NewText(fmt.Sprintf("Cursor: %d", cursor), color.White)
+
+	// Update functionc
 	updateMessage := func() {
-		message.Text = string(data)
-		message.Refresh() // redraw text without re-layout
+		lines := []fyne.CanvasObject{}
+		for _, line := range strings.Split(string(data), "\n") {
+			t := canvas.NewText(line, textColor)
+			t.TextStyle.Monospace = true
+			lines = append(lines, t)
+		}
+		messageBox.Objects = lines
+		messageBox.Refresh()
+		cursorLabel.Text = fmt.Sprintf("Cursor: %d", cursor)
+		cursorLabel.Refresh()
 	}
 
-	// Handle typed runes
-	w.Canvas().SetOnTypedRune(func(r rune) {
-		data = append(data, byte(r))
-		if _, err := file.WriteString(string(r)); err != nil {
-			fmt.Println("Error writing to file:", err)
-		}
+
+	// Insert character at cursor
+	insertRune := func(r rune) {
+		data = append(data[:cursor], append([]byte{byte(r)}, data[cursor:]...)...)
+		cursor++
+		writeFile(file, data)
 		updateMessage()
+	}
+
+	// Delete character before cursor
+	deleteRune := func() {
+		if len(data) > 0 && cursor > 0 {
+			data = append(data[:cursor-1], data[cursor:]...)
+			cursor--
+			writeFile(file, data)
+			updateMessage()
+		}
+	}
+
+	// Handle typing
+	w.Canvas().SetOnTypedRune(func(r rune) {
+		insertRune(r)
 	})
 
 	// Handle special keys
@@ -68,42 +98,42 @@ func main() {
 		switch e.Name {
 		case fyne.KeyEscape:
 			w.Close()
-
+			panic("exited by user")
 		case fyne.KeyBackspace:
-			if len(data) > 0 {
-				data = data[:len(data)-1]
-
-				// Truncate file and rewrite remaining data
-				if err := file.Truncate(0); err != nil {
-					fmt.Println("Error truncating file:", err)
-				}
-				if _, err := file.WriteAt(data, 0); err != nil {
-					fmt.Println("Error writing file:", err)
-				}
-
+			deleteRune()
+		case fyne.KeyReturn:
+			insertRune('\n')
+		case fyne.KeyLeft:
+			if cursor > 0 {
+				cursor--
 				updateMessage()
 			}
-
-		case fyne.KeySpace:
-			data = append(data, ' ')
-			if _, err := file.WriteString(" "); err != nil {
-				fmt.Println("Error writing space:", err)
+		case fyne.KeyRight:
+			if cursor < len(data) {
+				cursor++
+				updateMessage()
 			}
-			updateMessage()
-
-		case fyne.KeyReturn:
-			data = append(data, '\n')
-			if _, err := file.WriteString("\n"); err != nil {
-				fmt.Println("Error writing newline:", err)
-			}
-			updateMessage()
 		}
 	})
 
-	w.SetContent(container.NewVBox(
-		canvas.NewText("Type (ESC to exit):", theme.ForegroundColor()),
-		scroll,
-	))
+	// Layout: text with cursor counter at bottom
+	content := container.NewBorder(nil, cursorLabel, nil, nil, scroll)
 
+	w.SetContent(content)
+	w.Canvas().Refresh(content)
+	scroll.ScrollToTop()
 	w.ShowAndRun()
+}
+
+// Helper to overwrite file with new data
+func writeFile(file *os.File, data []byte) {
+	if err := file.Truncate(0); err != nil {
+		fmt.Println("Error truncating file:", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		fmt.Println("Error seeking file:", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		fmt.Println("Error writing file:", err)
+	}
 }
